@@ -16,6 +16,8 @@
 
 /*******************************************************************************
  * Level Surface (PLUMED CUSTOM CV)
+ * 
+ * Version 0.4
  *
  * A(ρ0) = ∫δ(ρ(r) - ρ0) |∇ρ(r)| dV
  * = Σδ(ρ(r) - ρ0) |∇ρ(r)| ΔV
@@ -27,7 +29,7 @@
  * https://en.wikipedia.org/wiki/Coarea_formula
  *
  * Author: Doyoung Hong ( tox1018@gmail.com )
- * Date: Jul 31, 2025
+ * Date: 2024
  * Tested on: PLUMED 2.8.3
  *******************************************************************************/
 
@@ -119,7 +121,8 @@ namespace PLMD
             size_t totalAtoms = getNumberOfAtoms();
             myAtoms.clear();
             myAtoms.reserve(totalAtoms / NumParallel_ + 1);
-            for (size_t i = 0; i < totalAtoms; i++) {
+            for (size_t i = 0; i < totalAtoms; i++) 
+            {
                 if (i % NumParallel_ == rank) myAtoms.push_back(i);
             }
 
@@ -128,58 +131,80 @@ namespace PLMD
 
         void LevelSurface::computeDensityAndGradient(const std::vector<Vector>& atomPositions, double boxL, Grid3D& grid)
         {
-            int nx = grid.nx, ny = grid.ny, nz = grid.nz;
-            double dx = grid.dx, dy = grid.dy, dz = grid.dz;
+            const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+            const double dx = grid.dx, dy = grid.dy, dz = grid.dz;
+
             std::fill(grid.rho.begin(), grid.rho.end(), 0.0);
             std::fill(grid.gradx.begin(), grid.gradx.end(), 0.0);
             std::fill(grid.grady.begin(), grid.grady.end(), 0.0);
             std::fill(grid.gradz.begin(), grid.gradz.end(), 0.0);
-            double inv2sig2 = 1.0 / (2.0 * sigma * sigma);
-            double cutoff = 3.0 * sigma;
-            double cutoffSq = cutoff * cutoff;
+
+            const double inv2sig2 = 1.0 / (2.0 * sigma * sigma);
+            const double cutoff = 3.0 * sigma;
+            const double cutoffSq = cutoff * cutoff;
+
+            const double invdx = 1.0 / dx, invdy = 1.0 / dy, invdz = 1.0 / dz;
+            const double cx = cutoff * invdx;
+            const double cy = cutoff * invdy;
+            const double cz = cutoff * invdz;
+
             for (size_t idx = 0; idx < myAtoms.size(); idx++)
             {
-                size_t a = myAtoms[idx];
+                const size_t a = myAtoms[idx];
 
-                //Centralize
-                double ax = atomPositions[a][0] - boxL / 2.0;
-                double ay = atomPositions[a][1] - boxL / 2.0;
-                double az = atomPositions[a][2] - boxL / 2.0;
+                const double ax = atomPositions[a][0] - boxL * 0.5;
+                const double ay = atomPositions[a][1] - boxL * 0.5;
+                const double az = atomPositions[a][2] - boxL * 0.5;
 
-                int ixmin = std::max(0, (int)std::floor((ax - cutoff + boxL / 2.0) / dx));
-                int ixmax = std::min(nx - 1, (int)std::ceil((ax + cutoff + boxL / 2.0) / dx));
-                int iymin = std::max(0, (int)std::floor((ay - cutoff + boxL / 2.0) / dy));
-                int iymax = std::min(ny - 1, (int)std::ceil((ay + cutoff + boxL / 2.0) / dy));
-                int izmin = std::max(0, (int)std::floor((az - cutoff + boxL / 2.0) / dz));
-                int izmax = std::min(nz - 1, (int)std::ceil((az + cutoff + boxL / 2.0) / dz));
+                const double ux = (ax + boxL * 0.5) * invdx - 0.5;
+                const double uy = (ay + boxL * 0.5) * invdy - 0.5;
+                const double uz = (az + boxL * 0.5) * invdz - 0.5;
 
-                for (int ix = ixmin; ix <= ixmax; ix++)
+                const int ixmin = (int)std::floor(ux - cx);
+                const int ixmax = (int)std::ceil(ux + cx);
+                const int iymin = (int)std::floor(uy - cy);
+                const int iymax = (int)std::ceil(uy + cy);
+                const int izmin = (int)std::floor(uz - cz);
+                const int izmax = (int)std::ceil(uz + cz);
+
+                for (int ix = ixmin; ix <= ixmax; ++ix)
                 {
-                    double gx_ = ix * dx - boxL / 2.0;
-                    double dx_ = gx_ - ax;
-                    for (int iy = iymin; iy <= iymax; iy++)
+                    const int iwrap = ((ix % nx) + nx) % nx;
+                    const double gx_ = (iwrap + 0.5) * dx - boxL * 0.5;
+
+                    for (int iy = iymin; iy <= iymax; ++iy)
                     {
-                        double gy_ = iy * dy - boxL / 2.0;
-                        double dy_ = gy_ - ay;
-                        for (int iz = izmin; iz <= izmax; iz++)
+                        const int jwrap = ((iy % ny) + ny) % ny;
+                        const double gy_ = (jwrap + 0.5) * dy - boxL * 0.5;
+
+                        for (int iz = izmin; iz <= izmax; ++iz)
                         {
-                            double gz_ = iz * dz - boxL / 2.0;
+                            const int kwrap = ((iz % nz) + nz) % nz;
+                            const double gz_ = (kwrap + 0.5) * dz - boxL * 0.5;
+
+                            double dx_ = gx_ - ax;
+                            double dy_ = gy_ - ay;
                             double dz_ = gz_ - az;
-                            double r2 = dx_ * dx_ + dy_ * dy_ + dz_ * dz_;
-                            if (r2 < cutoffSq)
-                            {
-                                double e = std::exp(-r2 * inv2sig2); // = exp(-r^2 / (2*sigma^2))
-                                double val = e;
-                                double f = -2.0 * inv2sig2; // f = -1/σ^2
-                                double grx = f * dx_ * val; // ∂e/∂x = (-x / σ^2) * e
-                                double gry = f * dy_ * val; // ∂e/∂y = (-y / σ^2) * e
-                                double grz = f * dz_ * val; // ∂e/∂z = (-z / σ^2) * e
-                                size_t grid_idx = (size_t)(ix * (ny * nz) + iy * nz + iz); //index3D -> index1D
-                                grid.rho[grid_idx] += val; //ρ = Σe (density) 
-                                grid.gradx[grid_idx] += grx; //∂ρ/∂x = Σ∂e/∂x
-                                grid.grady[grid_idx] += gry; //∂ρ/∂y = Σ∂e/∂y
-                                grid.gradz[grid_idx] += grz;//∂ρ/∂z = Σ∂e/∂z
-                            }
+                            dx_ -= boxL * std::nearbyint(dx_ / boxL);
+                            dy_ -= boxL * std::nearbyint(dy_ / boxL);
+                            dz_ -= boxL * std::nearbyint(dz_ / boxL);
+
+                            const double r2 = dx_ * dx_ + dy_ * dy_ + dz_ * dz_;
+                            if (r2 >= cutoffSq) continue;
+
+                            const double e = std::exp(-r2 * inv2sig2); // exp(-r^2/(2σ^2))
+                            const double val = e;
+                            const double f = -2.0 * inv2sig2;          // = -1/σ^2
+
+                            const double grx = f * dx_ * val;            // ∂e/∂x
+                            const double gry = f * dy_ * val;            // ∂e/∂y
+                            const double grz = f * dz_ * val;            // ∂e/∂z
+
+                            const size_t grid_idx = (size_t)(iwrap * (ny * nz) + jwrap * nz + kwrap);
+                            grid.rho[grid_idx] += val;
+                            grid.gradx[grid_idx] += grx;
+                            grid.grady[grid_idx] += gry;
+                            grid.gradz[grid_idx] += grz;
                         }
                     }
                 }
@@ -213,85 +238,137 @@ namespace PLMD
             return surfaceArea;
         }
 
-        void LevelSurface::computeCoareaDerivatives(const Grid3D& grid, const std::vector<Vector>& atomPositions, double boxL, std::vector<Vector>& derivatives)
+        void LevelSurface::computeCoareaDerivatives(const Grid3D& grid,const std::vector<Vector>& atomPositions,double boxL,std::vector<Vector>& derivatives)
         {
-            for (size_t i = 0; i < derivatives.size(); i++)
+            for (size_t i = 0; i < derivatives.size(); i++) 
             {
                 derivatives[i][0] = 0.0;
                 derivatives[i][1] = 0.0;
                 derivatives[i][2] = 0.0;
             }
-            int nx = grid.nx, ny = grid.ny, nz = grid.nz;
-            double dx = grid.dx, dy = grid.dy, dz = grid.dz;
-            double cellV = dx * dy * dz;
-            double inv2sig2 = 1.0 / (2.0 * sigma * sigma);
-            double cutoff = 3.0 * sigma;
-            double cutoffSq = cutoff * cutoff;
-            for (size_t idx = 0; idx < myAtoms.size(); idx++)
-            {
-                size_t a = myAtoms[idx];
-                //Centralize
-                double ax = atomPositions[a][0] - boxL / 2.0;
-                double ay = atomPositions[a][1] - boxL / 2.0;
-                double az = atomPositions[a][2] - boxL / 2.0;
 
-                int ixmin = std::max(0, (int)std::floor((ax - cutoff + boxL / 2.0) / dx));
-                int ixmax = std::min(nx - 1, (int)std::ceil((ax + cutoff + boxL / 2.0) / dx));
-                int iymin = std::max(0, (int)std::floor((ay - cutoff + boxL / 2.0) / dy));
-                int iymax = std::min(ny - 1, (int)std::ceil((ay + cutoff + boxL / 2.0) / dy));
-                int izmin = std::max(0, (int)std::floor((az - cutoff + boxL / 2.0) / dz));
-                int izmax = std::min(nz - 1, (int)std::ceil((az + cutoff + boxL / 2.0) / dz));
+            const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+            const double dx = grid.dx, dy = grid.dy, dz = grid.dz;
+            const double cellV = dx * dy * dz;
+
+            const double inv2sig2 = 1.0 / (2.0 * sigma * sigma);   // = 1/(2σ²)
+            const double invsig2 = 1.0 / (sigma * sigma);         // = 1/σ²
+            const double invsig4 = invsig2 * invsig2;             // = 1/σ⁴
+
+            const double cutoff = 3.0 * sigma;
+            const double cutoffSq = cutoff * cutoff;
+
+            const double invdx = 1.0 / dx, invdy = 1.0 / dy, invdz = 1.0 / dz;
+            const double cx = cutoff * invdx;
+            const double cy = cutoff * invdy;
+            const double cz = cutoff * invdz;
+
+            const double eps_n = 1e-12;
+
+            for (size_t idx = 0; idx < myAtoms.size(); idx++) 
+            {
+                const size_t a = myAtoms[idx];
+
+                const double ax = atomPositions[a][0] - boxL * 0.5;
+                const double ay = atomPositions[a][1] - boxL * 0.5;
+                const double az = atomPositions[a][2] - boxL * 0.5;
+
+                const double ux = (ax + boxL * 0.5) * invdx - 0.5;
+                const double uy = (ay + boxL * 0.5) * invdy - 0.5;
+                const double uz = (az + boxL * 0.5) * invdz - 0.5;
+
+                const int ixmin = (int)std::floor(ux - cx);
+                const int ixmax = (int)std::ceil(ux + cx);
+                const int iymin = (int)std::floor(uy - cy);
+                const int iymax = (int)std::ceil(uy + cy);
+                const int izmin = (int)std::floor(uz - cz);
+                const int izmax = (int)std::ceil(uz + cz);
 
                 double dSx = 0.0, dSy = 0.0, dSz = 0.0;
-                for (int ix = ixmin; ix <= ixmax; ix++)
+
+                for (int ix = ixmin; ix <= ixmax; ++ix) 
                 {
-                    double gx_ = ix * dx - boxL / 2.0;
-                    double dx_ = gx_ - ax;
-                    for (int iy = iymin; iy <= iymax; iy++)
+                    const int iwrap = ((ix % nx) + nx) % nx;
+                    const double gx_ = (iwrap + 0.5) * dx - boxL * 0.5;
+                    for (int iy = iymin; iy <= iymax; ++iy) 
                     {
-                        double gy_ = iy * dy - boxL / 2.0;
-                        double dy_ = gy_ - ay;
-                        for (int iz = izmin; iz <= izmax; iz++)
+                        const int jwrap = ((iy % ny) + ny) % ny;
+                        const double gy_ = (jwrap + 0.5) * dy - boxL * 0.5;
+                        for (int iz = izmin; iz <= izmax; ++iz) 
                         {
-                            double gz_ = iz * dz - boxL / 2.0;
+                            const int kwrap = ((iz % nz) + nz) % nz;
+                            const double gz_ = (kwrap + 0.5) * dz - boxL * 0.5;
+
+                            double dx_ = gx_ - ax;
+                            double dy_ = gy_ - ay;
                             double dz_ = gz_ - az;
-                            double r2 = dx_ * dx_ + dy_ * dy_ + dz_ * dz_;
-                            if (r2 < cutoffSq)
+                            dx_ -= boxL * std::nearbyint(dx_ / boxL);
+                            dy_ -= boxL * std::nearbyint(dy_ / boxL);
+                            dz_ -= boxL * std::nearbyint(dz_ / boxL);
+
+                            const double r2 = dx_ * dx_ + dy_ * dy_ + dz_ * dz_;
+                            if (r2 >= cutoffSq) continue;
+
+                            const size_t grid_idx = (size_t)(iwrap * (ny * nz) + jwrap * nz + kwrap);
+
+                            const double r = grid.rho[grid_idx];
+                            const double gxv = grid.gradx[grid_idx];
+                            const double gyv = grid.grady[grid_idx];
+                            const double gzv = grid.gradz[grid_idx];
+                            const double gradmag = std::sqrt(gxv * gxv + gyv * gyv + gzv * gzv);
+
+                            const double delta0 = smoothDelta(r - level, deltaSigma);
+                            const double deltaDer = dsmoothDelta_dx(r - level, deltaSigma);
+
+                            const double e = std::exp(-r2 * inv2sig2);
+                            const double f = -2.0 * inv2sig2; // = -1/σ²
+                            const double grxAtom = f * dx_ * e; // ∂e/∂x_atom
+                            const double gryAtom = f * dy_ * e; // ∂e/∂y_atom
+                            const double grzAtom = f * dz_ * e; // ∂e/∂z_atom
+
+                            // ========= TERM 1 =========
+                            // δ'(ρ-ρ0) * |∇ρ| * (-∂e/∂R_a) * dV
+                            dSx += (deltaDer * gradmag * (-grxAtom)) * cellV;
+                            dSy += (deltaDer * gradmag * (-gryAtom)) * cellV;
+                            dSz += (deltaDer * gradmag * (-grzAtom)) * cellV;
+
+                            // ========= TERM 2 =========
+                            // δ(ρ-ρ0) * ( ∇ρ / |∇ρ| ) · ∇( ∂ρ/∂R_a )
+                            // with ∂ρ/∂R_a = -∂e/∂x etc., so ∇(∂ρ/∂R_a) = -H_:component
+                            if (gradmag > eps_n) 
                             {
-                                size_t grid_idx = (size_t)(ix * (ny * nz) + iy * nz + iz);
-                                double r = grid.rho[grid_idx];
-                                double gxv = grid.gradx[grid_idx];
-                                double gyv = grid.grady[grid_idx];
-                                double gzv = grid.gradz[grid_idx];
-                                double gradmag = std::sqrt(gxv * gxv + gyv * gyv + gzv * gzv);
+                                const double invg = 1.0 / gradmag;
+                                const double nxn = gxv * invg;
+                                const double nyn = gyv * invg;
+                                const double nzn = gzv * invg;
 
-                                double deltaDer = dsmoothDelta_dx(r - level, deltaSigma);//δ'(ρ - ρ0)
-                                double e = std::exp(-r2 * inv2sig2);
-                                double f = -2.0 * inv2sig2;
-                                double grxAtom = f * dx_ * e; // ∂e/∂x = (-Δx/σ^2) * exp(...)
-                                double gryAtom = f * dy_ * e; // ∂e/∂y = (-Δy/σ^2) * exp(...)
-                                double grzAtom = f * dz_ * e; // ∂e/∂z = (-Δz/σ^2) * exp(...)
+                                // Hessian of Gaussian e: H_ij = (d_i d_j / σ⁴ - δ_ij / σ²) * e
+                                const double Hxx = (dx_ * dx_ * invsig4 - invsig2) * e;
+                                const double Hyy = (dy_ * dy_ * invsig4 - invsig2) * e;
+                                const double Hzz = (dz_ * dz_ * invsig4 - invsig2) * e;
+                                const double Hxy = (dx_ * dy_ * invsig4) * e;
+                                const double Hxz = (dx_ * dz_ * invsig4) * e;
+                                const double Hyz = (dy_ * dz_ * invsig4) * e;
 
-                                //term1 : δ'(ρ - ρ0)*|∇ρ|*∂e/∂x : primary contribution
-                                double term1x = deltaDer * gradmag * (-grxAtom);
-                                double term1y = deltaDer * gradmag * (-gryAtom);
-                                double term1z = deltaDer * gradmag * (-grzAtom);
+                                // n · ( -H_:component )
+                                const double t2x = -(nxn * Hxx + nyn * Hxy + nzn * Hxz);
+                                const double t2y = -(nxn * Hxy + nyn * Hyy + nzn * Hyz);
+                                const double t2z = -(nxn * Hxz + nyn * Hyz + nzn * Hzz);
 
-                                //term2 : δ(ρ - ρ0) * (∂|∇ρ|/∂x) : secondary contribution (ignored)
-
-                                //dS ? Σδ'(ρ - ρ0)*|∇ρ|*∂e/∂x * dV
-                                dSx += term1x * cellV;
-                                dSy += term1y * cellV;
-                                dSz += term1z * cellV;
+                                dSx += delta0 * t2x * cellV;
+                                dSy += delta0 * t2y * cellV;
+                                dSz += delta0 * t2z * cellV;
                             }
                         }
                     }
                 }
+
                 derivatives[a][0] += dSx;
                 derivatives[a][1] += dSy;
                 derivatives[a][2] += dSz;
             }
         }
+
 
         void LevelSurface::calculate()
         {
@@ -304,9 +381,9 @@ namespace PLMD
             grid.nx = nx;
             grid.ny = ny;
             grid.nz = nz;
-            grid.dx = boxL / (nx - 1);
-            grid.dy = boxL / (ny - 1);
-            grid.dz = boxL / (nz - 1);
+            grid.dx = boxL / nx;
+            grid.dy = boxL / ny;
+            grid.dz = boxL / nz;
             grid.rho.resize(nx * ny * nz, 0.0);
             grid.gradx.resize(nx * ny * nz, 0.0);
             grid.grady.resize(nx * ny * nz, 0.0);
