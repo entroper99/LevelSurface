@@ -29,7 +29,8 @@
  * https://en.wikipedia.org/wiki/Coarea_formula
  *
  * Author: Doyoung Hong ( tox1018@gmail.com )
- * Date: 2024
+ * Developed with AI assistance from Claude, Gemini, and GPT
+ * Date: Aug 3, 2025
  * Tested on: PLUMED 2.8.3
  *******************************************************************************/
 
