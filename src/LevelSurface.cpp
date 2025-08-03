@@ -30,7 +30,7 @@
  *
  * Author: Doyoung Hong ( tox1018@gmail.com )
  * Developed with AI assistance from Claude, Gemini, and GPT
- * Date: Aug 3, 2025
+ * Date: Dec 2, 2024
  * Tested on: PLUMED 2.8.3
  *******************************************************************************/
 
