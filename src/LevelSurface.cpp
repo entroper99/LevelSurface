@@ -22,7 +22,7 @@
  * A(ρ0) = ∫δ(ρ(r) - ρ0) |∇ρ(r)| dV
  * = Σδ(ρ(r) - ρ0) |∇ρ(r)| ΔV
  *
- * surf: LEVEL_SURFACE ATOMS=300-700 LEVEL=1.7 GRIDSIZE=32 SIGMA=0.68 DELTASIGMA=0.1
+ * surf: LEVEL_SURFACE ATOMS=300-700 LEVEL=0.3635 GRIDSIZE=32 SIGMA=0.68 DELTASIGMA=0.1
  *
  * Calculate the surface area of a given level set within a 3D density function using coarea formula.
  * For more information:
@@ -193,16 +193,17 @@ namespace PLMD
                             const double r2 = dx_ * dx_ + dy_ * dy_ + dz_ * dz_;
                             if (r2 >= cutoffSq) continue;
 
-                            const double e = std::exp(-r2 * inv2sig2); // exp(-r^2/(2σ^2))
-                            const double val = e;
+                            const double eRaw = std::exp(-r2 * inv2sig2); // exp(-r^2/(2σ^2))
+                            const double norm = 1.0 / (std::pow(2.0 * M_PI, 1.5) * sigma * sigma * sigma); // 1 / ( (2π)^(3/2) σ^3 )
+                            const double e = norm * eRaw;
                             const double f = -2.0 * inv2sig2;          // = -1/σ^2
 
-                            const double grx = f * dx_ * val;            // ∂e/∂x
-                            const double gry = f * dy_ * val;            // ∂e/∂y
-                            const double grz = f * dz_ * val;            // ∂e/∂z
+                            const double grx = f * dx_ * e;            // ∂e/∂x
+                            const double gry = f * dy_ * e;            // ∂e/∂y
+                            const double grz = f * dz_ * e;            // ∂e/∂z
 
                             const size_t grid_idx = (size_t)(iwrap * (ny * nz) + jwrap * nz + kwrap);
-                            grid.rho[grid_idx] += val;
+                            grid.rho[grid_idx] += e;
                             grid.gradx[grid_idx] += grx;
                             grid.grady[grid_idx] += gry;
                             grid.gradz[grid_idx] += grz;
@@ -321,7 +322,8 @@ namespace PLMD
                             const double delta0 = smoothDelta(r - level, deltaSigma);
                             const double deltaDer = dsmoothDelta_dx(r - level, deltaSigma);
 
-                            const double e = std::exp(-r2 * inv2sig2);
+                            const double norm = 1.0 / (std::pow(2.0 * M_PI, 1.5) * sigma * sigma * sigma); // 1 / ( (2π)^(3/2) σ^3 )
+                            const double e = norm * std::exp(-r2 * inv2sig2);
                             const double f = -2.0 * inv2sig2; // = -1/σ²
                             const double grxAtom = f * dx_ * e; // ∂e/∂x_atom
                             const double gryAtom = f * dy_ * e; // ∂e/∂y_atom
