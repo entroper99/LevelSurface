@@ -17,12 +17,12 @@
 /*******************************************************************************
  * Level Surface (PLUMED CUSTOM CV)
  * 
- * Version 0.4
+ * Version 0.41
  *
  * A(ρ0) = ∫δ(ρ(r) - ρ0) |∇ρ(r)| dV
  * = Σδ(ρ(r) - ρ0) |∇ρ(r)| ΔV
  *
- * surf: LEVEL_SURFACE ATOMS=300-700 LEVEL=0.3635 GRIDSIZE=32 SIGMA=0.68 DELTASIGMA=0.1
+ * surf: LEVEL_SURFACE ATOMS=300-700 LEVEL=0.3635 GRIDSIZE=32 SIGMA=0.68 DELTASIGMA=0.0202
  *
  * Calculate the surface area of a given level set within a 3D density function using coarea formula.
  * For more information:
@@ -68,6 +68,7 @@ namespace PLMD
             double level;
             double deltaSigma;
             double sigma;
+            Grid3D grid;
             unsigned NumParallel_; //number of parallel tasks
             std::vector<size_t> myAtoms;
             int attempts = 0;
@@ -87,9 +88,9 @@ namespace PLMD
             Colvar::registerKeywords(keys);
             keys.add("atoms", "ATOMS", "Atoms to build density function");
             keys.add("compulsory", "LEVEL", "Target density value (e.g. 1.8)");
-            keys.add("optional", "GRIDSIZE", "Grid resolution (default=64)");
+            keys.add("optional", "GRIDSIZE", "Grid resolution (default=32)");
             keys.add("optional", "SIGMA", "Gaussian width (default=0.68)");
-            keys.add("optional", "DELTASIGMA", "Width for smooth delta (default=0.1)");
+            keys.add("optional", "DELTASIGMA", "Width for smooth delta (default= 0.0202)");
             keys.addFlag("SERIAL", false, "perform the calculation in serial even if multiple tasks are available");
         }
 
@@ -98,16 +99,21 @@ namespace PLMD
             std::vector<AtomNumber> atoms;
             parseAtomList("ATOMS", atoms);
             parse("LEVEL", level);
-            nx = ny = nz = 64;
+            nx = ny = nz = 32;
             parse("GRIDSIZE", nx);
             ny = nx, nz = nx;
             sigma = 0.68;
             parse("SIGMA", sigma);
-            deltaSigma = 0.1;
+            deltaSigma = 0.0202;
             parse("DELTASIGMA", deltaSigma);
             addValueWithDerivatives();
             setNotPeriodic();
             requestAtoms(atoms);
+
+            grid.rho.resize(nx * ny * nz, 0.0);
+            grid.gradx.resize(nx * ny * nz, 0.0);
+            grid.grady.resize(nx * ny * nz, 0.0);
+            grid.gradz.resize(nx * ny * nz, 0.0);
 
             NumParallel_ = comm.Get_size();
             unsigned rank = comm.Get_rank();
@@ -134,6 +140,7 @@ namespace PLMD
         {
             const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
             const double dx = grid.dx, dy = grid.dy, dz = grid.dz;
+            const double norm = 1.0 / (std::pow(2.0 * M_PI, 1.5) * sigma * sigma * sigma); // 1 / ( (2π)^(3/2) σ^3 )
 
             std::fill(grid.rho.begin(), grid.rho.end(), 0.0);
             std::fill(grid.gradx.begin(), grid.gradx.end(), 0.0);
@@ -194,7 +201,6 @@ namespace PLMD
                             if (r2 >= cutoffSq) continue;
 
                             const double eRaw = std::exp(-r2 * inv2sig2); // exp(-r^2/(2σ^2))
-                            const double norm = 1.0 / (std::pow(2.0 * M_PI, 1.5) * sigma * sigma * sigma); // 1 / ( (2π)^(3/2) σ^3 )
                             const double e = norm * eRaw;
                             const double f = -2.0 * inv2sig2;          // = -1/σ^2
 
@@ -252,6 +258,7 @@ namespace PLMD
             const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
             const double dx = grid.dx, dy = grid.dy, dz = grid.dz;
             const double cellV = dx * dy * dz;
+            const double norm = 1.0 / (std::pow(2.0 * M_PI, 1.5) * sigma * sigma * sigma); // 1 / ( (2π)^(3/2) σ^3 )
 
             const double inv2sig2 = 1.0 / (2.0 * sigma * sigma);   // = 1/(2σ²)
             const double invsig2 = 1.0 / (sigma * sigma);         // = 1/σ²
@@ -322,7 +329,6 @@ namespace PLMD
                             const double delta0 = smoothDelta(r - level, deltaSigma);
                             const double deltaDer = dsmoothDelta_dx(r - level, deltaSigma);
 
-                            const double norm = 1.0 / (std::pow(2.0 * M_PI, 1.5) * sigma * sigma * sigma); // 1 / ( (2π)^(3/2) σ^3 )
                             const double e = norm * std::exp(-r2 * inv2sig2);
                             const double f = -2.0 * inv2sig2; // = -1/σ²
                             const double grxAtom = f * dx_ * e; // ∂e/∂x_atom
@@ -380,17 +386,14 @@ namespace PLMD
             double boxL = box[0][0];
             if ((box[1][1] != boxL) || (box[2][2] != boxL)) error("LEVEL_SURFACE requires a cubic box!");
             auto positions = getPositions();
-            Grid3D grid;
+            
             grid.nx = nx;
             grid.ny = ny;
             grid.nz = nz;
             grid.dx = boxL / nx;
             grid.dy = boxL / ny;
             grid.dz = boxL / nz;
-            grid.rho.resize(nx * ny * nz, 0.0);
-            grid.gradx.resize(nx * ny * nz, 0.0);
-            grid.grady.resize(nx * ny * nz, 0.0);
-            grid.gradz.resize(nx * ny * nz, 0.0);
+
 
             //auto timeStamp1 = std::chrono::high_resolution_clock::now();
             computeDensityAndGradient(positions, boxL, grid);
