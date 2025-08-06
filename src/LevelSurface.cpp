@@ -16,8 +16,8 @@
 
 /*******************************************************************************
  * Level Surface (PLUMED CUSTOM CV)
- * 
- * Version 0.41
+ *
+ * Version 0.42
  *
  * A(ρ0) = ∫δ(ρ(r) - ρ0) |∇ρ(r)| dV
  * = Σδ(ρ(r) - ρ0) |∇ρ(r)| ΔV
@@ -55,10 +55,13 @@ namespace PLMD
         {
             int nx, ny, nz;
             double dx, dy, dz;
-            std::vector<double> rho;
-            std::vector<double> gradx;
-            std::vector<double> grady;
-            std::vector<double> gradz;
+            std::vector<double> data;
+
+            inline size_t index(int x, int y, int z) const { return static_cast<size_t>(x * ny * nz + y * nz + z); }
+            inline double& rho_at(int x, int y, int z) { return data[index(x, y, z) * 4 + 0]; }
+            inline double& gradx_at(int x, int y, int z) { return data[index(x, y, z) * 4 + 1]; }
+            inline double& grady_at(int x, int y, int z) { return data[index(x, y, z) * 4 + 2]; }
+            inline double& gradz_at(int x, int y, int z) { return data[index(x, y, z) * 4 + 3]; }
         };
 
         class LevelSurface : public Colvar
@@ -76,8 +79,8 @@ namespace PLMD
             static void registerKeywords(Keywords& keys);
             explicit LevelSurface(const ActionOptions& ao);
             void computeDensityAndGradient(const std::vector<Vector>& atomPositions, double boxL, Grid3D& grid);
-            double computeCoareaSurface(const Grid3D& grid);
-            void computeCoareaDerivatives(const Grid3D& grid, const std::vector<Vector>& atomPositions, double boxL, std::vector<Vector>& derivatives);
+            double computeCoareaSurface();
+            void computeCoareaDerivatives(const std::vector<Vector>& atomPositions, double boxL, std::vector<Vector>& derivatives);
             void calculate() override;
         };
 
@@ -110,10 +113,7 @@ namespace PLMD
             setNotPeriodic();
             requestAtoms(atoms);
 
-            grid.rho.resize(nx * ny * nz, 0.0);
-            grid.gradx.resize(nx * ny * nz, 0.0);
-            grid.grady.resize(nx * ny * nz, 0.0);
-            grid.gradz.resize(nx * ny * nz, 0.0);
+            grid.data.resize(nx * ny * nz * 4, 0.0);
 
             NumParallel_ = comm.Get_size();
             unsigned rank = comm.Get_rank();
@@ -128,7 +128,7 @@ namespace PLMD
             size_t totalAtoms = getNumberOfAtoms();
             myAtoms.clear();
             myAtoms.reserve(totalAtoms / NumParallel_ + 1);
-            for (size_t i = 0; i < totalAtoms; i++) 
+            for (size_t i = 0; i < totalAtoms; i++)
             {
                 if (i % NumParallel_ == rank) myAtoms.push_back(i);
             }
@@ -141,11 +141,6 @@ namespace PLMD
             const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
             const double dx = grid.dx, dy = grid.dy, dz = grid.dz;
             const double norm = 1.0 / (std::pow(2.0 * M_PI, 1.5) * sigma * sigma * sigma); // 1 / ( (2π)^(3/2) σ^3 )
-
-            std::fill(grid.rho.begin(), grid.rho.end(), 0.0);
-            std::fill(grid.gradx.begin(), grid.gradx.end(), 0.0);
-            std::fill(grid.grady.begin(), grid.grady.end(), 0.0);
-            std::fill(grid.gradz.begin(), grid.gradz.end(), 0.0);
 
             const double inv2sig2 = 1.0 / (2.0 * sigma * sigma);
             const double cutoff = 3.0 * sigma;
@@ -209,17 +204,18 @@ namespace PLMD
                             const double grz = f * dz_ * e;            // ∂e/∂z
 
                             const size_t grid_idx = (size_t)(iwrap * (ny * nz) + jwrap * nz + kwrap);
-                            grid.rho[grid_idx] += e;
-                            grid.gradx[grid_idx] += grx;
-                            grid.grady[grid_idx] += gry;
-                            grid.gradz[grid_idx] += grz;
+
+                            grid.rho_at(iwrap, jwrap, kwrap) += e;
+                            grid.gradx_at(iwrap, jwrap, kwrap) += grx;
+                            grid.grady_at(iwrap, jwrap, kwrap) += gry;
+                            grid.gradz_at(iwrap, jwrap, kwrap) += grz;
                         }
                     }
                 }
             }
         }
 
-        double LevelSurface::computeCoareaSurface(const Grid3D& grid)
+        double LevelSurface::computeCoareaSurface()
         {
             double surfaceArea = 0.0;
             int nx = grid.nx, ny = grid.ny, nz = grid.nz;
@@ -231,10 +227,10 @@ namespace PLMD
                     for (int iz = 0; iz < nz; iz++)
                     {
                         size_t idx = (size_t)(ix * (ny * nz) + iy * nz + iz); //index3D -> index1D
-                        double r = grid.rho[idx]; //ρ(density)
-                        double gx = grid.gradx[idx]; //∂ρ/∂x
-                        double gy = grid.grady[idx]; //∂ρ/∂y
-                        double gz = grid.gradz[idx]; //∂ρ/∂z
+                        double r = grid.rho_at(ix, iy, iz); //ρ(density)
+                        double gx = grid.gradx_at(ix, iy, iz); //∂ρ/∂x
+                        double gy = grid.grady_at(ix, iy, iz); //∂ρ/∂y
+                        double gz = grid.gradz_at(ix, iy, iz); //∂ρ/∂z
                         double gradmag = std::sqrt(gx * gx + gy * gy + gz * gz); // |∇ρ|
                         double dval = smoothDelta(r - level, deltaSigma); // Only values near rho0 contribute
 
@@ -246,9 +242,9 @@ namespace PLMD
             return surfaceArea;
         }
 
-        void LevelSurface::computeCoareaDerivatives(const Grid3D& grid,const std::vector<Vector>& atomPositions,double boxL,std::vector<Vector>& derivatives)
+        void LevelSurface::computeCoareaDerivatives(const std::vector<Vector>& atomPositions, double boxL, std::vector<Vector>& derivatives)
         {
-            for (size_t i = 0; i < derivatives.size(); i++) 
+            for (size_t i = 0; i < derivatives.size(); i++)
             {
                 derivatives[i][0] = 0.0;
                 derivatives[i][1] = 0.0;
@@ -274,7 +270,7 @@ namespace PLMD
 
             const double eps_n = 1e-12;
 
-            for (size_t idx = 0; idx < myAtoms.size(); idx++) 
+            for (size_t idx = 0; idx < myAtoms.size(); idx++)
             {
                 const size_t a = myAtoms[idx];
 
@@ -295,15 +291,15 @@ namespace PLMD
 
                 double dSx = 0.0, dSy = 0.0, dSz = 0.0;
 
-                for (int ix = ixmin; ix <= ixmax; ++ix) 
+                for (int ix = ixmin; ix <= ixmax; ++ix)
                 {
                     const int iwrap = ((ix % nx) + nx) % nx;
                     const double gx_ = (iwrap + 0.5) * dx - boxL * 0.5;
-                    for (int iy = iymin; iy <= iymax; ++iy) 
+                    for (int iy = iymin; iy <= iymax; ++iy)
                     {
                         const int jwrap = ((iy % ny) + ny) % ny;
                         const double gy_ = (jwrap + 0.5) * dy - boxL * 0.5;
-                        for (int iz = izmin; iz <= izmax; ++iz) 
+                        for (int iz = izmin; iz <= izmax; ++iz)
                         {
                             const int kwrap = ((iz % nz) + nz) % nz;
                             const double gz_ = (kwrap + 0.5) * dz - boxL * 0.5;
@@ -320,10 +316,10 @@ namespace PLMD
 
                             const size_t grid_idx = (size_t)(iwrap * (ny * nz) + jwrap * nz + kwrap);
 
-                            const double r = grid.rho[grid_idx];
-                            const double gxv = grid.gradx[grid_idx];
-                            const double gyv = grid.grady[grid_idx];
-                            const double gzv = grid.gradz[grid_idx];
+                            const double r = grid.rho_at(iwrap, jwrap, kwrap);
+                            const double gxv = grid.gradx_at(iwrap, jwrap, kwrap);
+                            const double gyv = grid.grady_at(iwrap, jwrap, kwrap);
+                            const double gzv = grid.gradz_at(iwrap, jwrap, kwrap);
                             const double gradmag = std::sqrt(gxv * gxv + gyv * gyv + gzv * gzv);
 
                             const double delta0 = smoothDelta(r - level, deltaSigma);
@@ -344,7 +340,7 @@ namespace PLMD
                             // ========= TERM 2 =========
                             // δ(ρ-ρ0) * ( ∇ρ / |∇ρ| ) · ∇( ∂ρ/∂R_a )
                             // with ∂ρ/∂R_a = -∂e/∂x etc., so ∇(∂ρ/∂R_a) = -H_:component
-                            if (gradmag > eps_n) 
+                            if (gradmag > eps_n)
                             {
                                 const double invg = 1.0 / gradmag;
                                 const double nxn = gxv * invg;
@@ -386,7 +382,7 @@ namespace PLMD
             double boxL = box[0][0];
             if ((box[1][1] != boxL) || (box[2][2] != boxL)) error("LEVEL_SURFACE requires a cubic box!");
             auto positions = getPositions();
-            
+
             grid.nx = nx;
             grid.ny = ny;
             grid.nz = nz;
@@ -395,22 +391,19 @@ namespace PLMD
             grid.dz = boxL / nz;
 
 
-            //auto timeStamp1 = std::chrono::high_resolution_clock::now();
+            auto timeStamp1 = std::chrono::high_resolution_clock::now();
             computeDensityAndGradient(positions, boxL, grid);
-            //auto timeStamp2 = std::chrono::high_resolution_clock::now();
+            auto timeStamp2 = std::chrono::high_resolution_clock::now();
             if (NumParallel_ > 1)
             {
-                comm.Sum(grid.rho);
-                comm.Sum(grid.gradx);
-                comm.Sum(grid.grady);
-                comm.Sum(grid.gradz);
+                comm.Sum(grid.data);
             }
-            //auto timeStamp3 = std::chrono::high_resolution_clock::now();
-            double Svalue = computeCoareaSurface(grid);
+            auto timeStamp3 = std::chrono::high_resolution_clock::now();
+            double Svalue = computeCoareaSurface();
             vector<Vector> dSdR(getNumberOfAtoms());
-            //auto timeStamp4 = std::chrono::high_resolution_clock::now();
-            computeCoareaDerivatives(grid, positions, boxL, dSdR);
-            //auto timeStamp5 = std::chrono::high_resolution_clock::now();
+            auto timeStamp4 = std::chrono::high_resolution_clock::now();
+            computeCoareaDerivatives(positions, boxL, dSdR);
+            auto timeStamp5 = std::chrono::high_resolution_clock::now();
             if (NumParallel_ > 1)
             {
                 std::vector<double> flat_derivatives;
@@ -431,26 +424,36 @@ namespace PLMD
                     dSdR[i][2] = flat_derivatives[i * 3 + 2];
                 }
             }
-            //auto timeStamp6 = std::chrono::high_resolution_clock::now();
+            auto timeStamp6 = std::chrono::high_resolution_clock::now();
             setValue(Svalue);
             for (size_t i = 0; i < getNumberOfAtoms(); i++) setAtomsDerivatives(i, dSdR[i]);
             setBoxDerivativesNoPbc();
-            //auto timeStamp7 = std::chrono::high_resolution_clock::now();
+            auto timeStamp7 = std::chrono::high_resolution_clock::now();
 
-            //size_t rank_ = comm.Get_rank();
-            //if (rank_ == 0)
-            //{
-            //    auto time1 = std::chrono::duration_cast<std::chrono::nanoseconds>(timeStamp2 - timeStamp1).count();
-            //    auto time2 = std::chrono::duration_cast<std::chrono::nanoseconds>(timeStamp3 - timeStamp2).count();
-            //    auto time3 = std::chrono::duration_cast<std::chrono::nanoseconds>(timeStamp4 - timeStamp3).count();
-            //    auto time4 = std::chrono::duration_cast<std::chrono::nanoseconds>(timeStamp5 - timeStamp4).count();
-            //    auto time5 = std::chrono::duration_cast<std::chrono::nanoseconds>(timeStamp6 - timeStamp5).count();
-            //    auto time6 = std::chrono::duration_cast<std::chrono::nanoseconds>(timeStamp7 - timeStamp6).count();
-            //    printf("Timing - DensityGrid: %ld ns, GridComm: %ld ns, CoareaSurface: %ld ns, Derivatives: %ld ns, DerivComm: %ld ns, SetResults: %ld ns\n",
-            //        time1, time2, time3, time4, time5, time6);
-            //    attempts++;
-            //}
-            //if (attempts > 10) exit(-1);
+            size_t rank_ = comm.Get_rank();
+            if (rank_ == 0)
+            {
+                using namespace std::chrono;
+
+                double time1 = duration<double, std::milli>(timeStamp2 - timeStamp1).count();
+                double time2 = duration<double, std::milli>(timeStamp3 - timeStamp2).count();
+                double time3 = duration<double, std::milli>(timeStamp4 - timeStamp3).count();
+                double time4 = duration<double, std::milli>(timeStamp5 - timeStamp4).count();
+                double time5 = duration<double, std::milli>(timeStamp6 - timeStamp5).count();
+                double time6 = duration<double, std::milli>(timeStamp7 - timeStamp6).count();
+
+                std::cout << std::fixed << std::setprecision(3);
+                std::cout << "Profile - "
+                    << "DensityGrid: " << time1 << " ms, "
+                    << "GridComm: " << time2 << " ms, "
+                    << "CoareaSurface: " << time3 << " ms, "
+                    << "Derivatives: " << time4 << " ms, "
+                    << "DerivComm: " << time5 << " ms, "
+                    << "SetResults: " << time6 << " ms\n";
+
+                attempts++;
+            }
+            if (attempts > 10) exit(-1);
         }
     }
 }
