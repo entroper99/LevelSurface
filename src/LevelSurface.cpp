@@ -17,7 +17,7 @@
 /*******************************************************************************
  * Level Surface (PLUMED CUSTOM CV)
  *
- * Version 0.42
+ * Version 0.43
  *
  * A(ρ0) = ∫δ(ρ(r) - ρ0) |∇ρ(r)| dV
  * = Σδ(ρ(r) - ρ0) |∇ρ(r)| ΔV
@@ -75,12 +75,13 @@ namespace PLMD
             unsigned NumParallel_; //number of parallel tasks
             std::vector<size_t> myAtoms;
             int attempts = 0;
+            std::vector<double> derivs;
         public:
             static void registerKeywords(Keywords& keys);
             explicit LevelSurface(const ActionOptions& ao);
             void computeDensityAndGradient(const std::vector<Vector>& atomPositions, double boxL, Grid3D& grid);
             double computeCoareaSurface();
-            void computeCoareaDerivatives(const std::vector<Vector>& atomPositions, double boxL, std::vector<Vector>& derivatives);
+            void computeCoareaDerivatives(const std::vector<Vector>& atomPositions, double boxL);
             void calculate() override;
         };
 
@@ -114,6 +115,7 @@ namespace PLMD
             requestAtoms(atoms);
 
             grid.data.resize(nx * ny * nz * 4, 0.0);
+            derivs.resize(getNumberOfAtoms() * 3, 0.0);
 
             NumParallel_ = comm.Get_size();
             unsigned rank = comm.Get_rank();
@@ -242,15 +244,9 @@ namespace PLMD
             return surfaceArea;
         }
 
-        void LevelSurface::computeCoareaDerivatives(const std::vector<Vector>& atomPositions, double boxL, std::vector<Vector>& derivatives)
+        void LevelSurface::computeCoareaDerivatives(const std::vector<Vector>& atomPositions, double boxL)
         {
-            for (size_t i = 0; i < derivatives.size(); i++)
-            {
-                derivatives[i][0] = 0.0;
-                derivatives[i][1] = 0.0;
-                derivatives[i][2] = 0.0;
-            }
-
+            std::fill(derivs.begin(), derivs.end(), 0.0);
             const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
             const double dx = grid.dx, dy = grid.dy, dz = grid.dz;
             const double cellV = dx * dy * dz;
@@ -368,9 +364,9 @@ namespace PLMD
                     }
                 }
 
-                derivatives[a][0] += dSx;
-                derivatives[a][1] += dSy;
-                derivatives[a][2] += dSz;
+                derivs[a * 3 + 0] += dSx;
+                derivs[a * 3 + 1] += dSy;
+                derivs[a * 3 + 2] += dSz;
             }
         }
 
@@ -394,39 +390,16 @@ namespace PLMD
             auto timeStamp1 = std::chrono::high_resolution_clock::now();
             computeDensityAndGradient(positions, boxL, grid);
             auto timeStamp2 = std::chrono::high_resolution_clock::now();
-            if (NumParallel_ > 1)
-            {
-                comm.Sum(grid.data);
-            }
+            if (NumParallel_ > 1) comm.Sum(grid.data);
             auto timeStamp3 = std::chrono::high_resolution_clock::now();
             double Svalue = computeCoareaSurface();
-            vector<Vector> dSdR(getNumberOfAtoms());
             auto timeStamp4 = std::chrono::high_resolution_clock::now();
-            computeCoareaDerivatives(positions, boxL, dSdR);
+            computeCoareaDerivatives(positions, boxL);
             auto timeStamp5 = std::chrono::high_resolution_clock::now();
-            if (NumParallel_ > 1)
-            {
-                std::vector<double> flat_derivatives;
-                flat_derivatives.reserve(getNumberOfAtoms() * 3);
-                for (size_t i = 0; i < getNumberOfAtoms(); i++)
-                {
-                    flat_derivatives.push_back(dSdR[i][0]);
-                    flat_derivatives.push_back(dSdR[i][1]);
-                    flat_derivatives.push_back(dSdR[i][2]);
-                }
-
-                comm.Sum(flat_derivatives);
-
-                for (size_t i = 0; i < getNumberOfAtoms(); i++)
-                {
-                    dSdR[i][0] = flat_derivatives[i * 3 + 0];
-                    dSdR[i][1] = flat_derivatives[i * 3 + 1];
-                    dSdR[i][2] = flat_derivatives[i * 3 + 2];
-                }
-            }
+            if (NumParallel_ > 1) comm.Sum(derivs);
             auto timeStamp6 = std::chrono::high_resolution_clock::now();
             setValue(Svalue);
-            for (size_t i = 0; i < getNumberOfAtoms(); i++) setAtomsDerivatives(i, dSdR[i]);
+            for (size_t i = 0; i < getNumberOfAtoms(); i++) setAtomsDerivatives(i, { derivs[3 * i + 0],derivs[3 * i + 1],derivs[3 * i + 2] });
             setBoxDerivativesNoPbc();
             auto timeStamp7 = std::chrono::high_resolution_clock::now();
 
