@@ -17,7 +17,7 @@
 /*******************************************************************************
  * Level Surface (PLUMED CUSTOM CV)
  *
- * Version 0.43
+ * Version 0.44
  *
  * A(ρ0) = ∫δ(ρ(r) - ρ0) |∇ρ(r)| dV
  * = Σδ(ρ(r) - ρ0) |∇ρ(r)| ΔV
@@ -79,7 +79,7 @@ namespace PLMD
         public:
             static void registerKeywords(Keywords& keys);
             explicit LevelSurface(const ActionOptions& ao);
-            void computeDensityAndGradient(const std::vector<Vector>& atomPositions, double boxL, Grid3D& grid);
+            void computeDensityAndGradient(const std::vector<Vector>& atomPositions, double boxL);
             double computeCoareaSurface();
             void computeCoareaDerivatives(const std::vector<Vector>& atomPositions, double boxL);
             void calculate() override;
@@ -138,8 +138,9 @@ namespace PLMD
             checkRead();
         }
 
-        void LevelSurface::computeDensityAndGradient(const std::vector<Vector>& atomPositions, double boxL, Grid3D& grid)
+        void LevelSurface::computeDensityAndGradient(const std::vector<Vector>& atomPositions, double boxL)
         {
+            std::fill(grid.data.begin(), grid.data.end(), 0.0);
             const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
             const double dx = grid.dx, dy = grid.dy, dz = grid.dz;
             const double norm = 1.0 / (std::pow(2.0 * M_PI, 1.5) * sigma * sigma * sigma); // 1 / ( (2π)^(3/2) σ^3 )
@@ -172,20 +173,20 @@ namespace PLMD
                 const int izmin = (int)std::floor(uz - cz);
                 const int izmax = (int)std::ceil(uz + cz);
 
-                for (int ix = ixmin; ix <= ixmax; ++ix)
+                for (int iz = izmin; iz <= izmax; ++iz)
                 {
-                    const int iwrap = ((ix % nx) + nx) % nx;
-                    const double gx_ = (iwrap + 0.5) * dx - boxL * 0.5;
+                    const int kwrap = ((iz % nz) + nz) % nz;
+                    const double gz_ = (kwrap + 0.5) * dz - boxL * 0.5;
 
                     for (int iy = iymin; iy <= iymax; ++iy)
                     {
                         const int jwrap = ((iy % ny) + ny) % ny;
                         const double gy_ = (jwrap + 0.5) * dy - boxL * 0.5;
 
-                        for (int iz = izmin; iz <= izmax; ++iz)
+                        for (int ix = ixmin; ix <= ixmax; ++ix)
                         {
-                            const int kwrap = ((iz % nz) + nz) % nz;
-                            const double gz_ = (kwrap + 0.5) * dz - boxL * 0.5;
+                            const int iwrap = ((ix % nx) + nx) % nx;
+                            const double gx_ = (iwrap + 0.5) * dx - boxL * 0.5;
 
                             double dx_ = gx_ - ax;
                             double dy_ = gy_ - ay;
@@ -287,18 +288,18 @@ namespace PLMD
 
                 double dSx = 0.0, dSy = 0.0, dSz = 0.0;
 
-                for (int ix = ixmin; ix <= ixmax; ++ix)
+                for (int iz = izmin; iz <= izmax; ++iz) 
                 {
-                    const int iwrap = ((ix % nx) + nx) % nx;
-                    const double gx_ = (iwrap + 0.5) * dx - boxL * 0.5;
-                    for (int iy = iymin; iy <= iymax; ++iy)
+                    const int kwrap = ((iz % nz) + nz) % nz;
+                    const double gz_ = (kwrap + 0.5) * dz - boxL * 0.5;
+                    for (int iy = iymin; iy <= iymax; ++iy) 
                     {
                         const int jwrap = ((iy % ny) + ny) % ny;
                         const double gy_ = (jwrap + 0.5) * dy - boxL * 0.5;
-                        for (int iz = izmin; iz <= izmax; ++iz)
+                        for (int ix = ixmin; ix <= ixmax; ++ix) 
                         {
-                            const int kwrap = ((iz % nz) + nz) % nz;
-                            const double gz_ = (kwrap + 0.5) * dz - boxL * 0.5;
+                            const int iwrap = ((ix % nx) + nx) % nx;
+                            const double gx_ = (iwrap + 0.5) * dx - boxL * 0.5;
 
                             double dx_ = gx_ - ax;
                             double dy_ = gy_ - ay;
@@ -388,7 +389,7 @@ namespace PLMD
 
 
             auto timeStamp1 = std::chrono::high_resolution_clock::now();
-            computeDensityAndGradient(positions, boxL, grid);
+            computeDensityAndGradient(positions, boxL);
             auto timeStamp2 = std::chrono::high_resolution_clock::now();
             if (NumParallel_ > 1) comm.Sum(grid.data);
             auto timeStamp3 = std::chrono::high_resolution_clock::now();
