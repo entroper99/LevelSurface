@@ -1,4 +1,5 @@
 ﻿#define _USE_MATH_DEFINES
+#define LEVEL_SURFACE_VERSION "0.46"
 
 #include "colvar/Colvar.h"
 #include "core/ActionRegister.h"
@@ -16,8 +17,6 @@
 
 /*******************************************************************************
  * Level Surface (PLUMED CUSTOM CV)
- *
- * Version 0.45
  *
  * A(ρ0) = ∫δ(ρ(r) - ρ0) |∇ρ(r)| dV
  * = Σδ(ρ(r) - ρ0) |∇ρ(r)| ΔV
@@ -188,10 +187,6 @@ namespace PLMD
                             const int iwrap = ((ix % nx) + nx) % nx;
                             const double gx_ = (iwrap + 0.5) * dx - boxL * 0.5;
 
-
-
-
-
                             double dx_ = gx_ - ax;
                             double dy_ = gy_ - ay;
                             double dz_ = gz_ - az;
@@ -345,7 +340,7 @@ namespace PLMD
 
                             // ========= TERM 2 =========
                             // δ(ρ-ρ0) * ( ∇ρ / |∇ρ| ) · ∇( ∂ρ/∂R_a )
-                            // with ∂ρ/∂R_a = -∂e/∂x etc., so ∇(∂ρ/∂R_a) = -H_:component
+                            // = δ(ρ-ρ0) * ( n · ( -H ) )
                             if (gradmag > eps_n)
                             {
                                 const double invg = 1.0 / gradmag;
@@ -353,7 +348,7 @@ namespace PLMD
                                 const double nyn = gyv * invg;
                                 const double nzn = gzv * invg;
 
-                                // Hessian of Gaussian e: H_ij = (d_i d_j / σ⁴ - δ_ij / σ²) * e
+                                // H_ij = (d_i d_j / σ⁴ - δ_ij / σ²) * e
                                 const double Hxx = (dx_ * dx_ * invsig4 - invsig2) * e;
                                 const double Hyy = (dy_ * dy_ * invsig4 - invsig2) * e;
                                 const double Hzz = (dz_ * dz_ * invsig4 - invsig2) * e;
@@ -361,7 +356,7 @@ namespace PLMD
                                 const double Hxz = (dx_ * dz_ * invsig4) * e;
                                 const double Hyz = (dy_ * dz_ * invsig4) * e;
 
-                                // n · ( -H_:component )
+                                // n · ( -H )
                                 const double t2x = -(nxn * Hxx + nyn * Hxy + nzn * Hxz);
                                 const double t2y = -(nxn * Hxy + nyn * Hyy + nzn * Hyz);
                                 const double t2z = -(nxn * Hxz + nyn * Hyz + nzn * Hzz);
@@ -452,7 +447,7 @@ namespace PLMD
             //    double time6 = duration<double, std::milli>(timeStamp7 - timeStamp6).count();
 
             //    std::cout << std::fixed << std::setprecision(3);
-            //    std::cout << "v0.45 - "
+            //    std::cout << "v" << LEVEL_SURFACE_VERSION << " - "
             //        << "DensityGrid: " << time1 << " ms, "
             //        << "GridComm: " << time2 << " ms, "
             //        << "CoareaSurface: " << time3 << " ms, "
