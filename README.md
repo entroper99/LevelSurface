@@ -1,4 +1,4 @@
-## Coarea Formula
+## Level Surface ( PLUMED CUSTOM CV )
 
 $$A(\rho_0) = \int \delta(\rho(r) - \rho_0) |\nabla \rho(r)| \, dV$$
 
